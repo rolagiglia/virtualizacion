@@ -43,10 +43,6 @@ validar_fecha() {
     date -d "$fecha_normalizada" "+%Y-%m-%d" >/dev/null 2>&1
 }
 
-#Trap ejecuta limpiar_temporales cuando el script termine
-trap "rm -f $archivo_temporal" EXIT
-
-
 #Procesa opciones
 opciones=`getopt -o d:a:ph --long directorio:,archivoOut:,pantalla,help -- "$@"`
 
