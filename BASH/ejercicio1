@@ -44,7 +44,7 @@ validar_fecha() {
 }
 
 #Procesa opciones
-opciones=`getopt -o d:a:ph --long directorio:,archivoOut:,pantalla,help -- "$@"`
+opciones=`getopt -o d:a:ph --long directorio:,archivo:,pantalla,help -- "$@"`
 
 if [ "$?" -ne 0 ]; then
 	echo "Error: Faltan parametros. Use -h para ayuda." >&2
@@ -71,7 +71,7 @@ while true; do
 			fi
 			shift 
 			;;
-		-a | --archivoOut) 
+		-a | --archivo) 
 			if [[ -z "$2" || "$2" == -* ]]; then
                        		errores="$errores\nError: No se ha ingresado un nombre de archivo de salida"
                         else
