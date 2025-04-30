@@ -9,8 +9,8 @@ Descripcion:
 Procesa archivos CSV con temperaturas y genera un resumen por día y ubicación en formato JSON. La salida puede ser por pantalla(-p) o por archivo (-a <nombre de archivo>).
 
 Opciones:
-  -d, --directorio <ruta>   Directorio que contiene los archivos CSV a procesar (obligatorio)
-  -a, --archivo <archivo>   Archivo JSON de salida. No permite utilizarse en simultaneo con -p
+  -d, --directorio <"ruta">   Directorio que contiene los archivos CSV a procesar (obligatorio). Las rutas de los directorios deben encomillarse si poseen espacios. <"ruta"> 
+  -a, --archivo <"archivo">   Archivo JSON de salida. No permite utilizarse en simultaneo con -p. Los nombres de los archivos o sus rutas completas deben encomillarse si poseen espacios. <"archivo/ruta">
   -p, --pantalla            Muestra el JSON generado por pantalla. No permite su uso en simultaneo con -a
   -h, --help                Muestra esta ayuda.
 
