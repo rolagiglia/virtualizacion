@@ -47,7 +47,7 @@ validar_fecha() {
 opciones=`getopt -o d:a:ph --long directorio:,archivo:,pantalla,help -- "$@"`
 
 if [ "$?" -ne 0 ]; then
-	echo "Error: Faltan parametros. Use -h para ayuda." >&2
+	echo "Error en los parametros de la llamada. Use -h para ayuda." >&2
 	exit 1
 fi
 
@@ -57,14 +57,14 @@ eval set -- "$opciones"
 directorio=""
 archivoOut=""
 pantalla=false
-errores=""
+errores=false
 
 #Lee parametros
 while true; do
 	case "$1" in
 		-d | --directorio) 
 			if [[ -z "$2" || "$2" == -* || ! -d "$2" ]]; then
-        			errores="$errores \n Error: No se ha ingresado un directorio valido para la lectura de los archivos '.cvs'"
+        			errores=true
 			else
 				directorio="$2"
 				shift
@@ -72,21 +72,17 @@ while true; do
 			shift 
 			;;
 		-a | --archivo) 
-			if [[ -z "$2" || "$2" == -* ]]; then
-                       		errores="$errores\nError: No se ha ingresado un nombre de archivo de salida"
-                        else
-				if [[ "$pantalla" == true ]];then
-					errores="$errores\nNo se puede seleccionar -p (salida por pantalla) y -a (salida por archivo al mismo tiempo)"
-				else
-					archivoOut="$2"
-				fi
+			if [[ -z "$2" || "$2" == -* || "$pantalla" == true ]]; then
+				errores=true
+			else
+				archivoOut="$2"
 				shift
 			fi
-                	shift
+            shift
 			;;
 		-p | --pantalla) 
 			if [[ -n "$archivoOut" ]]; then 
-				errores="$errores\nNo se puede seleccionar -p (salida por pantalla) y -a (salida por archivo al mismo tiempo)"
+				errores=true
 			else
 				pantalla=true;
 			fi
@@ -98,7 +94,7 @@ while true; do
 		--) shift;
 		break 
 		;;
-		*) errors="$errores \n Error: Los parametros no son validos. Use -h para ayuda."
+		*) errors=true
 		shift
 		;;
 	esac
@@ -106,46 +102,40 @@ done
 
 #Validaciones adicionales
 
-if [[ -z "$errores" && -z "$directorio" ]]; then
-	errores="$errores\nNo se indico un directorio para lectura de archivos csv."
-fi
-if [[ -z "$archivoOut" && "$pantalla" == false ]]; then
-	errores="$errores \n Error: debe seleccionar -p (salida por pantalla) o -a <nombredearchivo> (salida por archivo)"
+if [[ ( "$errores" == false && -z "$directorio") || (-z "$archivoOut" && "$pantalla" == false) ]]; then
+    errores=true
 fi
 
-if [[ -n "$errores" ]];then
-	echo -e $errores
-	exit 1
+if [[ "$errores" == true ]]; then
+    echo "Error en los parametros de la llamada. Use -h para ayuda." >&2
+    exit 1
 fi
 
-## Validar que haya archivos .csv en el directorio
+## Validar archivos .csv en el directorio
 
 #Shopt: los patrones que no coincidan con ningún archivo se expanden a una cadena vacía.
 shopt -s nullglob
 
 csv_files=("$directorio"/*.csv)
 
-if [ ${#csv_files[@]} -eq 0 ]; then
-	echo "Error: No hay archivos CSV en el directorio $directorio." >&2
-	exit 1
-fi
-
-
-# Verifico las fechas de los nombres de archivos
-
 cantidad_archivos=0
 archivos_validos=()
 
 for archivo in "${csv_files[@]}"; do
     fecha_archivo=$(basename "$archivo" .csv)
-
-    if validar_fecha "$fecha_archivo"; then
-        archivos_validos+=("$archivo")
-	((cantidad_archivos++))
-    fi
+    # Verificar que la fecha sea válida y que el archivo no esté vacío
+	if validar_fecha "$fecha_archivo" && [[ -s "$archivo" && -f "$archivo" ]]; then
+		archivos_validos+=("$archivo")
+		((cantidad_archivos++))
+	fi
 done
 
+if [[ ${#csv_files[@]} -eq 0 || "$cantidad_archivos" -eq 0 ]]; then
+    echo "Error: No hay archivos CSV válidos en el directorio." >&2
+    exit 1
+fi
 
+#Crea archivo temporal
 archivo_temporal=$(mktemp)
 
 #Trap ejecuta limpiar_temporales cuando el script termine
@@ -177,30 +167,22 @@ awk -F',' '
     }
     
     {
-     # Validar la fecha, hora, temperatura y ubicación
+     
      fecha=$2;
      hora=$3;
      ubicacion=$4;
      temp=$5;
      # Validar fecha
-        if (!validar_fecha(fecha)){
+	if (!validar_fecha(fecha)){
             next
 	}
+	
 	fecha=normalizar_fecha(fecha)
-        # Validar hora
-        if (!validar_hora(hora)) {
-            next
-        }
-
-        # Validar temperatura
-        if (!validar_temperatura(temp)) {
-            next
-        }
-
-        # Validar ubicación
-        if (!validar_ubicacion(ubicacion)) {
-            next
-        }
+    
+	# Validar hora, temperatura y ubicación
+	if (!validar_hora(hora) || !validar_temperatura(temp) || !validar_ubicacion(ubicacion)) {
+		next
+	}
 
     key = fecha SUBSEP ubicacion
 
