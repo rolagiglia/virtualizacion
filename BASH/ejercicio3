@@ -120,12 +120,12 @@ fi
 
 awk -v palabras="$palabras" '
 BEGIN {
-	#Guardo las palabras con índices numéricos en temp
-	split(palabras, temp, " ")
-	for (p in temp) {
-		#Inicializo array asociativo
-		lista_palabras[temp[p]] = 0
-  }
+	#Guardo las palabras con índices numéricos en "claves"
+	split(palabras, claves, " ")
+	for (i in claves) {
+		lista_palabras[claves[i]] = 0
+	}
+	total_palabras = length(claves)
 }
 {
 	#Por cada linea del archivo actual
@@ -137,9 +137,23 @@ BEGIN {
 	}
 }
 END {
-  print "Resultado del conteo:"
-  for (palabra in lista_palabras) {
-    print palabra ": " lista_palabras[palabra]
-  }
+	  print "Resultado del conteo:"
+
+	# Ordenar claves[] por valor en lista_palabras[], descendente
+	for (i = 1; i <= total_palabras; i++) {
+		for (j = i + 1; j <= total_palabras; j++) {
+			if (lista_palabras[claves[i]] < lista_palabras[claves[j]]) {
+				tmp = claves[i]
+				claves[i] = claves[j]
+				claves[j] = tmp
+			}
+		}
+	}
+
+	# Imprimir resultados ordenados
+	for (i = 1; i <= total_palabras; i++) {
+		palabra = claves[i]
+		print palabra ": " lista_palabras[palabra]
+	}
 }' "${lista_archivos[@]}"
 
