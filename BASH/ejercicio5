@@ -1,6 +1,6 @@
 #! /usr/bin/bash
 
-#Funcion para mostrar ayuda
+# Función para mostrar ayuda y cómo usar el script
 mostrarAyuda() {
   cat <<EOF
 
@@ -37,29 +37,30 @@ Notas:
 EOF
 }
 
-API_URL="https://www.fruityvice.com/api/fruit"
-CACHE_DIR="/tmp/fruta_cache_$USER"
+API_URL="https://www.fruityvice.com/api/fruit"         # URL base de la API
+CACHE_DIR="/tmp/fruta_cache_$USER"                      # Directorio de caché personalizado por usuario
 
 # Crear el directorio de caché si no existe
 mkdir -p "$CACHE_DIR"
 
-# Función para obtener datos de la API o del caché
+# Función para consultar fruta por ID o nombre
 consultar_fruta() {
-    local clave=$1  # puede ser id o nombre
+    local clave=$1  # puede ser id numérico o nombre textual
     local url="$API_URL/$clave"
     local cache_file="$CACHE_DIR/$clave.json"
 
-    # Si ya está en caché, usarlo
+    # Si el resultado ya está en caché, usarlo directamente
     if [[ -f "$cache_file" ]]; then
         cat "$cache_file"
         return 0
     fi
 
-    # Si no está en caché, consultar la API
+    # Si no está en caché, consultar la API (capturando código HTTP al final)
     response=$(curl -s -w "%{http_code}" "$url")
-    body="${response::-3}"           # todo menos los últimos 3 caracteres (el código HTTP)
-    code="${response: -3}"           # últimos 3 caracteres (código HTTP)
+    body="${response::-3}"           # Cuerpo de la respuesta sin el código HTTP
+    code="${response: -3}"           # Últimos 3 caracteres = código HTTP
 
+    # Guardar respuesta válida y devolverla
     if [[ "$code" == "200" ]]; then
         echo "$body" > "$cache_file"
         echo "$body"
@@ -70,7 +71,7 @@ consultar_fruta() {
     fi
 }
 
-# Función para imprimir la información
+# Función para imprimir los datos de la fruta en formato legible
 imprimir_info() {
     local json="$1"
 	echo
@@ -87,25 +88,28 @@ imprimir_info() {
 	echo
 }
 
-#Procesa opciones
+# Procesamiento de opciones con getopt
 opciones=`getopt -o i:n: --long id:,name: -- "$@"`
 
+# Verificar errores de parsing
 if [ "$?" -ne 0 ]; then
 	echo "Error en los parametros. Use -h para ayuda." >&2
 	exit 1
 fi
 
+# Asignar los valores parseados
 eval set -- "$opciones"
 
-#Variables para los parametros y errores
+# Variables para guardar los parámetros recibidos
 id=""
 name=""
 errores=false
 
-#Lee parametros
+# Leer los parámetros uno por uno
 while true; do
 	case "$1" in
 		-i | --id)
+			# Validar que el argumento no esté vacío ni sea una nueva opción
 			if [[ -z "$2" || "$2" == -* ]]; then
         		errores=true
 			else
@@ -136,22 +140,22 @@ while true; do
 	esac
 done
 
-
-#Validaciones adicionales
-
+# Validar que se haya recibido al menos un parámetro válido
 if [[ "$errores" == false && -z "$id" && -z "$name" ]]; then
     errores=true
 fi
 
+# Si hubo errores, salir con mensaje
 if [[ "$errores" == true ]]; then
     echo "Error en los parametros de la llamada. Use -h para ayuda." >&2
     exit 1
 fi
 
-
+# Arrays para almacenar valores válidos encontrados
 numeros_validos=()
 nombres_validos=()
 
+# Procesar IDs de frutas si se especificaron
 if [[ -n "$id" ]]; then
     IFS=',' read -ra numeros <<< "$id"
     for numero in "${numeros[@]}"; do
@@ -167,9 +171,11 @@ if [[ -n "$id" ]]; then
     done
 fi
 
+# Procesar nombres de frutas si se especificaron
 if [[ -n "$name" ]]; then
     IFS=',' read -ra nombres <<< "$name"
     for nombre in "${nombres[@]}"; do
+        # Validación: solo letras, incluyendo tildes y ñ
         if ! [[ "$nombre" =~ ^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]{2,}$ ]]; then
             echo "La palabra $nombre no es válida."
         else
@@ -182,8 +188,8 @@ if [[ -n "$name" ]]; then
     done
 fi
 
+# Verificar si al menos una fruta fue válida y mostrada
 if [[ ${#numeros_validos[@]} -eq 0 && ${#nombres_validos[@]} -eq 0 ]]; then
     echo "Ninguno de los valores de id o name no son validos o no pudieron consultarse."
     exit 1
 fi
-
