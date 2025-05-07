@@ -1,0 +1,224 @@
+#! /usr/bin/bash
+
+# Verificación de que curl y jq están instalados
+verificar_dependencias() {
+    if ! command -v curl &> /dev/null; then
+        echo "Error: curl no está instalado. Por favor, instálalo para continuar." >&2
+        exit 1
+    fi
+
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq no está instalado. Por favor, instálalo para continuar." >&2
+        exit 1
+    fi
+}
+
+# Llamar a la función de verificación
+verificar_dependencias
+
+# Función para mostrar ayuda y cómo usar el script
+mostrarAyuda() {
+  cat <<EOF
+
+Uso: $0
+
+Este script consulta información nutricional sobre frutas utilizando la API pública de Fruityvice.
+Se pueden definir dos arrays dentro del script:
+
+  - numeros: contiene IDs de frutas (por ejemplo: 1, 2, 3)
+  - nombres: contiene nombres de frutas (en inglés, por ejemplo: "banana", "apple")
+
+El script realizará:
+  - Consultas a la API por cada ID y nombre especificado.
+  - Almacenamiento en caché de las respuestas en /tmp/fruta_cache.
+  - Impresión en pantalla de los nutrientes de cada fruta encontrada, en el siguiente formato:
+
+    id: 2,
+    name: Orange,
+    genus: Citrus,
+    calories: 43,
+    fat: 0.2,
+    sugar: 8.2,
+    carbohydrates: 8.3,
+    protein: 1
+
+Requisitos:
+  - curl
+  - jq
+
+Opciones:
+  -i, --id      "IDS de las frutas a consultar"
+  -n, --name    "Nombre de las frutas a consultar
+  -h, --help    "Muestra ayuda y termina la ejecucion del script"
+
+Ejemplos de uso:
+  ./script.sh --id "1,2"
+  ./script.sh --name "banana,orange"
+  ./script.sh --id "1,2" --name "banana,orange"
+  ./script.sh -i "1,2" -n "banana,orange"
+  ./script.sh -i "1,2"
+  ./script.sh -n "banana,orange"
+
+Notas:
+  - Si una fruta no se encuentra, se muestra una advertencia.
+  - Las respuestas válidas se guardan para evitar repetir consultas.
+  - El caché se guarda en /tmp y puede eliminarse al reiniciar el sistema.
+EOF
+}
+
+API_URL="https://www.fruityvice.com/api/fruit"         # URL base de la API
+CACHE_DIR="/tmp/fruta_cache_$USER"                      # Directorio de caché personalizado por usuario
+
+# Crear el directorio de caché si no existe
+mkdir -p "$CACHE_DIR"
+
+# Función para consultar fruta por ID o nombre
+consultar_fruta() {
+    local clave=$1  # puede ser id numérico o nombre textual
+    local url="$API_URL/$clave"
+    local cache_file="$CACHE_DIR/$clave.json"
+
+    # Si el resultado ya está en caché, usarlo directamente
+    if [[ -f "$cache_file" ]]; then
+        cat "$cache_file"
+        return 0
+    fi
+
+    # Si no está en caché, consultar la API (capturando código HTTP al final)
+    response=$(curl -s -w "%{http_code}" "$url")
+    body="${response::-3}"           # Cuerpo de la respuesta sin el código HTTP
+    code="${response: -3}"           # Últimos 3 caracteres = código HTTP
+
+    # Guardar respuesta válida y devolverla
+    if [[ "$code" == "200" ]]; then
+        echo "$body" > "$cache_file"
+        echo "$body"
+    elif [[ "$code" == "404" ]]; then
+        echo "Error: Fruta '$clave' no encontrada (404)" >&2
+    else
+        echo "Error al consultar '$clave' (HTTP $code)" >&2
+    fi
+}
+
+# Función para imprimir los datos de la fruta en formato legible
+imprimir_info() {
+    local json="$1"
+	echo
+    echo "$json" | jq -r '[
+        "id: \(.id)",
+        "name: \(.name)",
+        "genus: \(.genus)",
+        "calories: \(.nutritions.calories)",
+        "fat: \(.nutritions.fat)",
+        "sugar: \(.nutritions.sugar)",
+        "carbohydrates: \(.nutritions.carbohydrates)",
+        "protein: \(.nutritions.protein)"
+    ] | join("\n")'
+	echo
+}
+
+# Procesamiento de opciones con getopt
+opciones=`getopt -o i:n:h --long id:,name:,help -- "$@"`
+
+# Verificar errores de parsing
+if [ "$?" -ne 0 ]; then
+	echo "Error en los parametros. Use -h para ayuda." >&2
+	exit 1
+fi
+
+# Asignar los valores parseados
+eval set -- "$opciones"
+
+# Variables para guardar los parámetros recibidos
+id=""
+name=""
+errores=false
+
+# Leer los parámetros uno por uno
+while true; do
+	case "$1" in
+		-i | --id)
+			# Validar que el argumento no esté vacío ni sea una nueva opción
+			if [[ -z "$2" || "$2" == -* ]]; then
+        		errores=true
+			else
+				id="$2"
+				shift
+			fi
+			shift 
+			;;
+		-n | --name) 
+			if [[ -z "$2" || "$2" == -* ]]; then
+				errores=true
+            else
+				name="$2"
+				shift			
+			fi
+            shift
+			;;
+		-h | --help) 
+		mostrarAyuda;
+		exit 0 
+		;;
+		--) shift;
+		break 
+		;;
+		*) errores=true
+			shift
+			;;
+	esac
+done
+
+# Validar que se haya recibido al menos un parámetro válido
+if [[ "$errores" == false && -z "$id" && -z "$name" ]]; then
+    errores=true
+fi
+
+# Si hubo errores, salir con mensaje
+if [[ "$errores" == true ]]; then
+    echo "Error en los parametros de la llamada. Use -h para ayuda." >&2
+    exit 1
+fi
+
+# Arrays para almacenar valores válidos encontrados
+numeros_validos=()
+nombres_validos=()
+
+# Procesar IDs de frutas si se especificaron
+if [[ -n "$id" ]]; then
+    IFS=',' read -ra numeros <<< "$id"
+    for numero in "${numeros[@]}"; do
+        if ! [[ "$numero" =~ ^[0-9]{1,3}$ ]] || [[ "$numero" -le 0 ]]; then
+            echo "El id $numero no es válido."
+        else
+            resultado=$(consultar_fruta "$numero")
+            if [[ -n "$resultado" && "$resultado" != Error* ]]; then
+                imprimir_info "$resultado"
+                numeros_validos+=("$numero")
+            fi
+        fi
+    done
+fi
+
+# Procesar nombres de frutas si se especificaron
+if [[ -n "$name" ]]; then
+    IFS=',' read -ra nombres <<< "$name"
+    for nombre in "${nombres[@]}"; do
+        # Validación: solo letras, incluyendo tildes y ñ
+        if ! [[ "$nombre" =~ ^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]{2,}$ ]]; then
+            echo "La palabra $nombre no es válida."
+        else
+            resultado=$(consultar_fruta "$nombre")
+            if [[ -n "$resultado" && "$resultado" != Error* ]]; then
+                imprimir_info "$resultado"
+                nombres_validos+=("$nombre")
+            fi
+        fi
+    done
+fi
+
+# Verificar si al menos una fruta fue válida y mostrada
+if [[ ${#numeros_validos[@]} -eq 0 && ${#nombres_validos[@]} -eq 0 ]]; then
+    echo "Ninguno de los valores de id o name no son validos o no pudieron consultarse."
+    exit 1
+fi

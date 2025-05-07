@@ -46,43 +46,10 @@ EOF
 
 #Funciones
 
-# Producto escalar: Multiplicar cada elemento de la matriz por el número
-producto_escalar() {
-    echo "$1" | awk -v prod="$producto" -F"$separador" '
-    {
-        for(i=1; i<=NF; i++) {
-            $i = $i * prod
-        }
-        print $0
-    }' > "salida.$(basename "$matriz")"
+# Escapa el separador si contiene caracteres especiales de regex
+escape_regex() {
+  echo "$1" | sed -E 's/[][\/.^$*+?|(){}]/\\&/g'
 }
-
-# Trasponer la matriz (intercambiar filas por columnas)
-transponer() {
-    echo "$matriz_data" | awk -F"$separador" '
-    {
-        for(i=1; i<=NF; i++) {
-            matriz[NR,i] = $i
-        }
-    }
-    END {
-        for(i=1; i<=NF; i++) {
-            for(j=1; j<=NR; j++) {
-                printf "%s", matriz[j,i]
-                if(j < NR) { printf "%s", FS }
-            }
-            print ""
-        }
-    }' > "salida.$(basename "$matriz")"
-}
-
-# Si se pasa un archivo de matriz
-if [[ -n "$matriz" ]]; then
-    procesar_matriz "$matriz"
-fi
-
-
-
 
 #Procesa opciones
 opciones=`getopt -o m:p:ts:h --long matriz:,producto:,trasponer,separador:,help -- "$@"`
@@ -105,10 +72,14 @@ errores=false
 while true; do
 	case "$1" in
 		-m | --matriz)
-			if [[ -z "$2" || "$2" == -* || ! -f "$2" || ! $(file --mime-type "$2") =~ text ]]; then
+			if [[ -z "$2" || "$2" == -* || ! -f "$2" || ! "$(file --mime-type -b "$2")" =~ ^text/ ]]; then
         			errores=true
 			else
-				matriz="$2"
+				matriz="$2"				
+				
+				# Conversión segura a formato Unix (CRLF -> LF)
+				matriz_tmp="$(mktemp)"
+				tr -d '\r' < "$matriz" > "$matriz_tmp" && mv "$matriz_tmp" "$matriz"
 				shift
 			fi
 			shift 
@@ -155,6 +126,9 @@ while true; do
 	esac
 done
 
+#Trap eliminacion de archivo_temporal cuando el script finalice
+trap "rm -f $matriz_tmp" EXIT
+
 #Validaciones adicionales
 
 # Si no hay errores previos, verificamos que los parámetros obligatorios estén presentes y sean coherentes
@@ -176,82 +150,90 @@ fi
 nombre_archivo=$(basename "$matriz")
 directorio_archivo=$(dirname "$matriz")
 archivo_salida="${directorio_archivo}/salida.${nombre_archivo}"
-
-
+separador_escapado=$(escape_regex "$separador")
 
 # Leer el archivo y lo procesa con awk
-    awk -v separador="$separador" -v producto="$producto" -v trasponer="$trasponer" '
-    BEGIN {
-        FS = separador
-		primera_fila = 1
-		numero_campos = -1
-    }
-    {
-		 # Contamos los campos de la fila actual
-		campos = NF
-		
-		# Si es la primera fila, establecemos el número de campos
-		if (primera_fila) {
-			numero_campos = campos
-			primera_fila = 0
-		}
-		
-		# Si el número de campos no coincide con el de la primera fila, mostramos un error
-		if (campos != numero_campos) {
-			print "Error: Los registros del archivo no son validos"
-			exit 1  
-		}
-		
-		#Almacenamos el campo del registro actual
-        for(i = 1; i <= NF; i++) {
-            if($i !~ /^[-+]?[0-9]+(\.[0-9]+)?$/){
-				print "Error: El archivo posee campos no validos"
-				exit 1
-			}
-			matriz[NR,i] = $i
-        }
-        
-    }
-    END {
-        if( NR != campos || NR == 0){
-			print "Archivo vacio o cantidad de filas no valida."
+awk_result=$(awk -v separador="$separador_escapado" -v producto="$producto" -v trasponer="$trasponer" '
+BEGIN {
+	FS = separador
+	primera_fila = 1
+	numero_campos = -1
+	error = 0
+}
+{
+	 # Contamos los campos de la fila actual
+	campos = NF
+	
+	# Si es la primera fila, establecemos el número de campos
+	if (primera_fila) {
+		numero_campos = campos
+		primera_fila = 0
+	}
+	
+	# Si el número de campos no coincide con el de la primera fila, mostramos un error
+	if (campos != numero_campos) {
+		print "Error: matriz no valida. La cantidad de valores de las filas no coincide."
+		error = 1
+		exit 1  
+	}
+	
+	#Almacenamos el campo del registro actual
+	for(i = 1; i <= NF; i++) {
+		 if ($i !~ /^[-+]?[0-9]+([.][0-9]+)?$/) {
+			print "Error: El archivo posee campos no validos"
+			error = 1
 			exit 1
 		}
-		else	
-			if (trasponer == "true") {
-				#trasponer
-				for (i = 1; i <= campos; i++) {
-					for (j = 1; j <= NR; j++) {
-						printf "%s", matriz[j,i]
-						if (j < NR) 
-							printf "|"
-					}
-					print ""
+		matriz[NR,i] = $i
+	}
+	
+}
+END {
+	if (error) 
+		exit 1  # No procesar si hubo errores
+		
+	if( NR == 0){
+		print "Archivo vacio."
+		exit 1
+	}
+	else	
+		if (trasponer == "true") {
+			#trasponer
+			for (i = 1; i <= campos; i++) {
+				for (j = 1; j <= NR; j++) {
+					printf "%s", matriz[j,i]
+					if (j < NR) 
+						printf "%s", separador
+				}
+				print ""
+			}
+		} 
+		else if (producto != "") {
+			#Producto escalar
+			for (i = 1; i <= NR; i++) {
+				for (j = 1; j <= campos; j++) {
+					printf "%s", matriz[i,j] * producto
+					if (j < campos) 
+						printf "%s", separador
+				}
+				print ""
 				}
 			} 
-			else if (producto != "") {
-				#Producto escalar
-				for (i = 1; i <= NR; i++) {
-					for (j = 1; j <= campos; j++) {
-						printf "%s", matriz[i,j] * producto
-						if (j < campos) 
-							printf "|"
-					}
-					print ""
-					}
-				} 
-				else {
-					print "Error: No se indicó ni producto ni trasposición."
-					exit 1
-				}
-	}' "$matriz" > "$archivo_salida" 
-	
-	cat "$archivo_salida"
-	
-	
-	
-	
-	
-	
-	
+			else {
+				print "Error: No se indicó ni producto ni trasposición."
+				exit 1
+			}
+}' "$matriz" 2>&1) 
+
+# Verificar si hubo errores en AWK
+if [[ "$awk_result" =~ ^Error ]]; then
+    echo "${awk_result//$'\n'/ }" >&2
+    exit 1
+fi
+
+# Si todo está bien, guardar el resultado
+echo "$awk_result" > "$archivo_salida"
+
+echo "La operación se completó exitosamente. El resultado se guardó en: $archivo_salida"
+cat "$archivo_salida"
 	
